@@ -12,7 +12,7 @@ Implement a system that:
 
 ### Class Structure
 
-1. **BankAccountApplication**
+1. **BankingSystemApplication**
    - Main class that initializes and starts all components
    
 
@@ -22,7 +22,7 @@ Implement a system that:
 
 3. **Transaction**
    - Model class representing a single transaction
-   - Contains amount, type (CREDIT/DEBIT), and timestamp
+   - Contains amount, type (CREDIT/DEBIT)
 
 4. **BankAccountService** (interface)
    - Defines methods for processing transactions and retrieving balance
@@ -36,7 +36,7 @@ Implement a system that:
    - Processes transactions using BankAccountService
    - Sends processed transactions to AuditSystem
 
-7. **AuditSystem**
+7. **AuditBatchingService**
    - Receives transactions for auditing
    - Implements batch optimization algorithm
    - Submits optimized batches to a simulated downstream system
@@ -68,10 +68,10 @@ Implement a system that:
 4. TransactionProcessor -> AuditSystem
    - Sends processed transactions for auditing
 
-5. AuditSystem -> BatchOptimizationStrategy
+5. AuditBatchingService -> BatchOptimizationStrategy
    - Uses the strategy to optimize batches of transactions
 
-6. AuditSystem -> (Simulated) Downstream Audit System
+6. AuditBatchingService -> (Simulated) Downstream Audit System
    - Submits optimized batches for auditing
 
 ## Key Algorithms
