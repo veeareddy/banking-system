@@ -79,34 +79,39 @@ Implement a system that:
 ### First-Fit Decreasing (FFD) for Batch Optimization
 
 ```java
-public List<TransactionBatch> optimizeBatches(List<Transaction> transactions, int maxBatchSize, BigDecimal maxBatchValue) {
-    List<TransactionBatch> batches = new ArrayList<>();
-    PriorityQueue<Transaction> maxHeap = new PriorityQueue<>(
-        (a, b) -> b.getAmount().abs().compareTo(a.getAmount().abs())
-    );
-    maxHeap.addAll(transactions);
+  @Override
+    public List<TransactionBatch> optimizeBatches(List<Transaction> transactions, int maxBatchSize,
+                                                  BigDecimal maxBatchValue) {
+        List<TransactionBatch> batches = new ArrayList<>();
 
-    while (!maxHeap.isEmpty()) {
-        Transaction transaction = maxHeap.poll();
-        boolean added = false;
+        // sort the transactions in descending order using prioriry queue (Max Heap)
+        PriorityQueue<Transaction> maxHeap = new PriorityQueue<>((a, b) -> b.getAmount()
+                .compareTo(a.getAmount()));
 
-        for (TransactionBatch batch : batches) {
-            if (batch.canAdd(transaction)) {
-                batch.addTransaction(transaction);
-                added = true;
-                break;
+        maxHeap.addAll(transactions);
+
+        while (!maxHeap.isEmpty()) {
+            Transaction transaction = maxHeap.poll();
+            boolean added = false;
+            // Iterate over all the batches and see if you can fit the current transaction in any of the batches
+            for (TransactionBatch batch : batches) {
+                if (batch.canFitTransaction(transaction)) {
+                    batch.addTransaction(transaction);
+                    added = true;
+                    break;
+                }
+            }
+            // if the transaction doesnt fit in any of the batches , create a new batch and add to it
+            if (!added) {
+                TransactionBatch newBatch = new TransactionBatch(maxBatchSize, maxBatchValue);
+                newBatch.addTransaction(transaction);
+                batches.add(newBatch);
             }
         }
 
-        if (!added) {
-            TransactionBatch newBatch = new TransactionBatch(maxBatchSize, maxBatchValue);
-            newBatch.addTransaction(transaction);
-            batches.add(newBatch);
-        }
+        return batches;
     }
-
-    return batches;
-}
+    
 ```
 
 This algorithm:
@@ -150,24 +155,29 @@ Our solution implements the Strategy Pattern for batch optimization, allowing fo
    - `FirstFitDecreasingStrategy`: Implements the First-Fit Decreasing algorithm (as shown earlier).
    - `GreedyStrategy`: An alternative implementation using a simpler greedy approach.
 
-3. **Usage in AuditSystem**
+3. **Usage in AuditBatchingServiceImpl**
+
    ```java
-   public class AuditSystem {
-       private BatchOptimizationStrategy optimizationStrategy;
+    @Bean
+    public BatchOptimizationStrategy batchOptimizationStrategy() {
+        return new FirstFitDecreasingStrategy();
+    }
 
-       public AuditSystem(BatchOptimizationStrategy strategy) {
-           this.optimizationStrategy = strategy;
-       }
-
-       public void setOptimizationStrategy(BatchOptimizationStrategy strategy) {
-           this.optimizationStrategy = strategy;
-       }
-
-       public void processTransactionsForAudit(List<Transaction> transactions) {
-           List<TransactionBatch> batches = optimizationStrategy.optimizeBatches(transactions, MAX_BATCH_SIZE, MAX_BATCH_VALUE);
-           // Process batches...
-       }
-   }
+    @Autowired
+    public AuditBatchingServiceImpl(BatchSubmissionWorker batchSubmissionWorker,
+                                    BatchOptimizationStrategy batchStrategy,
+                                    @Qualifier("auditExecutorService") ExecutorService executorService,
+                                    @Qualifier("auditMaxBatchSize") int maxBatchSize,
+                                    @Qualifier("auditMaxBatchValue") BigDecimal maxBatchValue,
+                                    @Qualifier("auditBufferSize") int bufferSize) {
+        this.auditQueue = new LinkedBlockingQueue<>();
+        this.batchSubmissionWorker = batchSubmissionWorker;
+        this.batchStrategy = batchStrategy;
+        this.executorService = executorService;
+        this.maxBatchSize = maxBatchSize;
+        this.maxBatchValue = maxBatchValue;
+        this.bufferSize = bufferSize;
+    }
    ```
 
 ### Alternative Optimization Strategies
@@ -178,27 +188,41 @@ Our solution implements the Strategy Pattern for batch optimization, allowing fo
 
 2. **Greedy Strategy**
    ```java
-   public class GreedyStrategy implements BatchOptimizationStrategy {
-       @Override
-       public List<TransactionBatch> optimizeBatches(List<Transaction> transactions, int maxBatchSize, BigDecimal maxBatchValue) {
-           List<TransactionBatch> batches = new ArrayList<>();
-           TransactionBatch currentBatch = new TransactionBatch(maxBatchSize, maxBatchValue);
+    @Override
+    public List<TransactionBatch> optimizeBatches(List<Transaction> transactions, int maxBatchSize,
+                                                  BigDecimal maxBatchValue) {
 
-           for (Transaction transaction : transactions) {
-               if (!currentBatch.canAdd(transaction)) {
-                   batches.add(currentBatch);
-                   currentBatch = new TransactionBatch(maxBatchSize, maxBatchValue);
-               }
-               currentBatch.addTransaction(transaction);
-           }
+        List<TransactionBatch> batches = new ArrayList<>();
+        // sort them in descending order of transaction value
+        PriorityQueue<Transaction> maxHeap = new PriorityQueue<>(
+                (a, b) -> b.getAmount()
+                        .compareTo(a.getAmount())
+        );
 
-           if (!currentBatch.isEmpty()) {
-               batches.add(currentBatch);
-           }
+        maxHeap.addAll(transactions);
 
-           return batches;
-       }
-   }
+        TransactionBatch currentBatch = new TransactionBatch(maxBatchSize, maxBatchValue);
+
+        while (!maxHeap.isEmpty()) {
+            Transaction transaction = maxHeap.poll();
+            // check if the current batch can take this transaction
+            if (currentBatch.canFitTransaction(transaction)) {
+                currentBatch.addTransaction(transaction);
+            } else {
+                // add current batch to the list of batchs and put current transaction in new batch
+                batches.add(currentBatch);
+                currentBatch = new TransactionBatch(maxBatchSize, maxBatchValue);
+                currentBatch.addTransaction(transaction);
+            }
+        }
+        // add last batch
+        if (!currentBatch.getTransactions()
+                .isEmpty()) {
+            batches.add(currentBatch);
+        }
+
+        return batches;
+    }
    ```
    - Simpler implementation, potentially faster for very large transaction volumes.
    - May produce more batches than FFD in some cases.
@@ -215,5 +239,11 @@ Our solution implements the Strategy Pattern for batch optimization, allowing fo
 
 ### Switching Strategies
 
-The strategy can be easily switched at runtime:
+The strategy can be easily switched at runtime by changing the AuditProcessingConfig
+```java
+    @Bean
+    public BatchOptimizationStrategy batchOptimizationStrategy() {
+        return new FirstFitDecreasingStrategy();
+    }
 
+```
