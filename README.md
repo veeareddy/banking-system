@@ -65,7 +65,7 @@ Implement a system that:
 3. TransactionProcessor -> BankAccountService
    - Processes each transaction, updating the account balance
 
-4. TransactionProcessor -> AuditSystem
+4. TransactionProcessor -> AuditBatchingService
    - Sends processed transactions for auditing
 
 5. AuditBatchingService -> BatchOptimizationStrategy
